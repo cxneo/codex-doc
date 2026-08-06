@@ -1,129 +1,258 @@
-# 06｜项目记忆：用 AGENTS.md 说清团队约定
+# 06｜项目指令与记忆：AGENTS.md、覆盖规则和 Memories
 
-上一讲结束时，Codex 已经能沿着代码追踪数据流。但每次新会话，你仍可能重复解释：“这是 Compose 项目”“不要直接让 ViewModel 访问 DAO”“用 Gradle Wrapper”“没有模拟器就不要声称 UI 测试通过”。
+新人第一次进入 Android 仓库时，最怕的不是文件多，而是不知道哪些约定必须遵守：模块怎样分层、哪些命令可信、Room 迁移有什么禁区、完成任务前必须提供什么证据。
 
-`AGENTS.md` 就是解决这种重复的项目记忆。
+Codex 需要同样的入职材料，但这里有两个不能混为一谈的概念：
 
-## 把它当成新同事的第一页
+- `AGENTS.md` 是团队提交到仓库的正式项目指令；
+- Memories 是 Codex 可选的本地回忆层，用来带回过去会话中的有用背景。
 
-一份好的 `AGENTS.md` 不会复制整本架构文档，也不会罗列所有目录。它应该帮助刚进入仓库的协作者迅速回答：
+必须执行的规则写进仓库。个人偏好或历史线索可以进入 Memories，但不能成为团队唯一的事实源。
 
-- 这个项目解决什么问题；
-- 从哪里开始阅读；
-- 修改时必须遵守哪些约束；
-- 怎样构建和验证；
-- 哪些操作风险很高；
-- 更详细的资料在哪里。
+## 本讲目标
 
-换句话说，它是路标，不是百科全书。
+学完后，你应该能够：
 
-## Codex 怎样发现 AGENTS.md
+- 解释 Codex 怎样寻找和合并 `AGENTS.md`；
+- 为 Android 仓库编写短小、可验证的项目指令；
+- 用嵌套文件或 override 处理局部差异；
+- 用 `/debug-config` 调查实际生效配置；
+- 正确开启、关闭和审查 Memories。
 
-Codex 会把指令按作用域组合起来。用户级可以在 `~/.codex/AGENTS.md` 放个人通用偏好；进入项目后，它会从项目根目录沿着当前工作目录向下查找 `AGENTS.md`。更靠近当前文件的指令优先级更高。
+## AGENTS.md 到底是什么
 
-同一目录如果存在 `AGENTS.override.md`，它会作为该目录的覆盖文件。这个机制适合特殊子树，而不适合随手绕过根规则。
+把它想成“Codex 进入目录时必须先读的工作说明”，适合记录：
 
-对一个多模块 Android 仓库，可以这样组织：
+- 项目结构和事实入口；
+- 已验证的构建、测试和 Lint 命令；
+- 架构边界与修改禁区；
+- Android 特有的迁移、生命周期和无障碍要求；
+- 团队期望的调查、实现、验证和汇报方式。
+
+它不适合记录：
+
+- API Key、签名口令或内部个人信息；
+- 会快速过期的任务状态；
+- 大段可从代码或官方文档直接推导的知识；
+- “写出高质量代码”这类无法判定是否遵守的口号。
+
+配套项目中的真实文件是 [`配套文件/PocketTasks-codex/AGENTS.md`](./配套文件/PocketTasks-codex/AGENTS.md)。
+
+## Codex 怎样发现项目指令
+
+发现过程分为两层。
+
+### 第一层：个人全局指令
+
+Codex 先检查 Codex home，默认是 `~/.codex`：
+
+1. 如果存在非空的 `~/.codex/AGENTS.override.md`，读取它；
+2. 否则读取 `~/.codex/AGENTS.md`；
+3. 这一层只采用第一个符合条件的文件。
+
+全局文件适合个人通用偏好，例如“汇报时列出实际运行的测试”。不要把只属于 PocketTasks 的 Room 规则放在这里。
+
+### 第二层：项目目录链
+
+Codex 从项目根目录一路走到当前工作目录。在经过的每一级目录中，按以下顺序取最多一个文件：
+
+```text
+AGENTS.override.md → AGENTS.md → 配置的 fallback 文件名
+```
+
+越靠近当前目录的内容越晚加入上下文，因此可以针对局部模块给出更具体的规则。
+
+例如：
 
 ```text
 PocketTasks/
-├── AGENTS.md                  # 全仓库约定
+├── AGENTS.md                         # 全项目通用规则
 ├── app/
-│   └── AGENTS.md             # Android 应用模块细则
+│   └── AGENTS.md                     # Compose 与 UI 测试规则
 └── core/database/
-    └── AGENTS.md             # Room Schema 与迁移要求
+    └── AGENTS.override.md            # Room 迁移的严格覆盖规则
 ```
 
-当 Codex 在 `core/database` 下工作时，会同时获得根规则和数据库规则；发生冲突时，距离更近的规则胜出。
+```mermaid
+flowchart TD
+    G["~/.codex/AGENTS.override.md\n否则 AGENTS.md"]
+    R["仓库根 AGENTS.md"]
+    M["app/AGENTS.md"]
+    D["core/database/AGENTS.override.md"]
+    G --> R --> M --> D
+```
 
-## 为 PocketTasks 写第一版
+项目指令合计默认最多读取 32 KiB，受 `project_doc_max_bytes` 控制。超过上限时，不要第一反应就是无限提高数值；先删除重复内容，把局部规则放到对应子目录。
 
-先从够用的内容开始：
+## 为 PocketTasks 写一份可执行的入职页
+
+一份好的根指令首先给 Codex导航：
 
 ```markdown
 # PocketTasks 工作指南
 
-## 项目定位
-离线优先的 Android 待办应用。Kotlin + Compose，Room 是任务数据的本地事实源。
+## 先读什么
+- 需求：specs/001-task-filter/spec.md
+- 实施计划：specs/001-task-filter/plan.md
+- 团队原则：docs/constitution.md
 
-## 阅读入口
-- UI：app/src/main/java/.../ui/tasks/
-- 数据：app/src/main/java/.../data/
-- 架构决定：docs/constitution.md
+## 项目结构
+- app/src/main/.../ui：Compose 与 ViewModel
+- app/src/main/.../data：Room、DataStore、Repository
+- app/src/test：JVM 单元测试
+- app/src/androidTest：Compose 与数据库迁移测试
 
-## 实现约束
-- Composable 不直接访问 DAO 或 Repository。
-- ViewModel 暴露不可变 uiState，UI 通过事件回传意图。
-- 数据层通过 Repository 暴露数据；不要为了形式给简单转发新增 Use Case。
-- 用户可见文案进入资源文件；新增交互要考虑无障碍语义。
-- Room Schema 改动必须提供 Migration 和迁移测试，不允许破坏性迁移。
+## 验证命令
+- 快速：./gradlew :app:testDebugUnitTest
+- 完整本地：./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+- 设备测试：./gradlew :app:connectedDebugAndroidTest
 
-## 验证
-- 单元测试：./gradlew :app:testDebugUnitTest
-- Lint：./gradlew :app:lintDebug
-- 构建：./gradlew :app:assembleDebug
-- 设备测试：./gradlew :app:connectedDebugAndroidTest（需要设备或模拟器）
-
-## 工作方式
-- 修改前先调查现有模式并给出计划。
-- 只改任务范围内的文件，不整理无关代码。
-- 收尾时列出实际执行的验证和未执行项。
+## 工作边界
+- 修改前先调查事实源和测试。
+- Room schema 变化必须更新版本、Migration 和迁移测试。
+- 不提交 local.properties、签名文件或凭据。
+- 完成时报告实际运行的命令；未运行的验证必须明确说明。
 ```
 
-这里没有写 Kotlin 语法规则，因为格式化器和 Lint 更适合做这件事；也没有列每个类，因为目录会变化，搜索比静态清单可靠。
+这几条都能通过文件、diff 或命令结果检查。相反，“保持优雅”“尽量完善”无法形成稳定合同。
 
-## 用分层规则处理 Android 特殊风险
+## 用嵌套规则处理 Android 高风险区域
 
-数据库目录比普通 UI 目录风险更高，可以增加一个局部文件：
+数据库目录可以增加更严格的 `AGENTS.override.md`：
 
 ```markdown
-# Room 数据库附加规则
+# Room 数据库覆盖规则
 
-- 修改 Entity、索引或表结构前，先读取导出的 Schema 与全部 Migration。
-- 禁止使用 fallbackToDestructiveMigration。
-- 每次版本升级提供 MigrationTestHelper 测试。
-- 不修改已经发布版本对应的历史 Schema 文件。
-- 完成时报告升级路径，例如 3 → 4，而不只报告全新安装成功。
+- 禁止 destructive migration。
+- 修改 Entity 前先读取已导出的 schema。
+- 每次升级必须提供 `MigrationTestHelper` 测试。
+- 测试至少从仍受支持的最老版本迁移到当前版本。
+- 不得删除旧 schema JSON。
 ```
 
-这样，只有进入数据库子树的任务才加载细节，根文件仍然容易阅读。
+为什么使用 override？因为这里希望替换同目录的普通 `AGENTS.md`，并把“数据不可丢失”提升为明确局部边界。大多数情况使用普通嵌套 `AGENTS.md` 就够了，不必到处创建 override。
+
+## 项目信任会影响什么
+
+项目 `.codex/config.toml`、项目 Hooks 和 Rules 都可能执行或放宽能力，因此 Codex 只在受信任项目中加载相关项目层配置。刚克隆陌生仓库时，先审查：
+
+```bash
+sed -n '1,240p' AGENTS.md
+sed -n '1,240p' .codex/config.toml
+sed -n '1,260p' .codex/hooks.json
+rg --files .codex .agents
+```
+
+信任项目不等于“以后所有命令都自动安全”。它只是允许项目层定制参与配置，沙箱、审批和 Hook 仍然各自生效。
+
+## 用 `/debug-config` 调查实际生效内容
+
+当 Codex 的行为和预期不一致时，不要凭感觉继续加规则。在 CLI 中输入：
+
+```text
+/debug-config
+```
+
+重点检查：
+
+- 项目根目录是否识别正确；
+- 哪些配置层参与合并；
+- 是否存在上层 `AGENTS.override.md`；
+- `project_doc_max_bytes` 是否导致截断；
+- 项目是否处于 trusted 状态；
+- 管理员 `requirements.toml` 是否限制了某项配置。
+
+然后用一个只读问题验证指令是否被理解：
+
+```text
+不要修改文件。根据当前项目指令，列出本项目的快速验证、
+完整验证和 Room schema 变更要求，并标出这些要求来自哪个文件。
+```
+
+预期结果不是逐字背诵，而是来源、作用域和命令都正确。
+
+## Memories 是另一层能力
+
+Memories 可以把过去聊天中有用的上下文带到未来聊天。ChatGPT Web 的记忆与本地 Codex 客户端使用的记忆存储并不相同；本地 Codex Memories 默认关闭，主要文件位于：
+
+```text
+~/.codex/memories/
+```
+
+在配置中开启：
+
+```toml
+[features]
+memories = true
+```
+
+在 CLI 或桌面聊天中输入：
+
+```text
+/memories
+```
+
+你可以控制当前聊天是否读取已有记忆，以及是否允许它为未来生成记忆。聊天级选择不会替代全局设置。
+
+### 适合进入 Memories 的内容
+
+- 你偏好先看测试失败再看实现；
+- 某个长期项目常用的解释背景；
+- 过去调查形成、但仍需重新验证的线索。
+
+### 不应只存在 Memories 中的内容
+
+- 发布必须运行哪些命令；
+- Room 不允许 destructive migration；
+- 团队代码风格；
+- 模块归属和审查责任；
+- 密钥、令牌和签名信息。
+
+最简单的判断是：如果同事换一台电脑仍然必须知道，就写进仓库，而不是只留在 Memories。
 
 ## 常见失败方式
 
-### 把愿望写成规则
+### 文件太长
 
-“代码要优雅、测试要充分”无法执行。改成“ViewModel 不暴露 MutableStateFlow”“每条验收标准至少对应一种验证证据”。
+表现：规则互相重复，重要命令被淹没，甚至触发字节上限。
 
-### 把规则写成小说
-
-文件越长，关键约束越容易被淹没。背景说明放链接，入口文件只保留行动所需的信息。
+修正：根文件只保留全局合同，模块细节下沉到嵌套文件，长教程放普通文档并从 AGENTS 链接。
 
 ### 写了不存在的命令
 
-复制模板后最常见的问题，是模块名与 Gradle task 不匹配。所有命令都要在当前仓库验证。
+表现：Codex 每次都以同一种方式失败。
 
-### 同一条规则四处复制
+修正：先在干净环境执行命令，再写入 AGENTS；版本、模块名和测试任务必须与仓库一致。
 
-重复会产生冲突。根文件写共同约定，目录文件只写增量。如果某项原则需要深入解释，链接到 `docs/constitution.md`。
+### 把 Memory 当政策
 
-## 检查 Codex 实际读到了什么
+表现：不同电脑、不同同事得到不一致行为。
 
-你可以让 Codex 在不修改文件的情况下复述当前生效的项目指令，并标注来源。也可以使用 `/status` 了解当前会话与工作目录。第一次引入分层 AGENTS 时，分别从根目录、`app` 和数据库目录启动一次调查，验证作用域是否符合预期。
+修正：把必须执行的要求迁回 AGENTS、测试、Rules 或 Hook。
 
-如果项目尚无 `AGENTS.md`，CLI 的 `/init` 可以生成起点，但生成后仍要由团队删改和验证。自动生成的说明不是项目真相，代码和团队共识才是。
+### 复制同一条规则到四处
 
-## 小结
+表现：一次修改后出现互相冲突的版本。
 
-`AGENTS.md` 是 Codex 的项目入职页：根文件建立共同语言，目录文件补充局部风险，覆盖文件只处理真正的例外。内容要短、具体、可验证，并把详细背景链接出去。
+修正：只保留一个事实源，其他位置使用链接或更窄的补充规则。
 
-可是，“做事入口”与“为什么坚持这些原则”不是同一类信息。下一讲，我们会单独建立 `constitution.md`，让架构取舍在需求变化时仍有稳定依据。
+## 本讲实践
 
-## 思考题
+1. 打开配套 [`AGENTS.md`](./配套文件/PocketTasks-codex/AGENTS.md)。
+2. 检查里面每条 Gradle 命令是否能从仓库根目录运行。
+3. 为数据库目录设计一个不超过 12 行的嵌套规则。
+4. 使用 `/debug-config` 记录实际加载层。
+5. 打开 `/memories`，确认当前聊天的读取和生成策略。
 
-1. 你的根 AGENTS.md 中，哪三条规则应该对所有模块生效？
-2. 哪个 Android 子目录风险最高，值得增加局部 AGENTS.md？
+## 完成标志
+
+- 你能画出全局与项目指令的发现顺序；
+- `AGENTS.md` 中没有密钥和空泛口号；
+- 关键命令已经实际运行；
+- 你能解释 AGENTS 和 Memories 为什么不能互相替代。
 
 ## 延伸阅读
 
-- [Codex：使用 AGENTS.md 提供自定义指令](https://developers.openai.com/codex/guides/agents-md/)
-
+- [Codex AGENTS.md 指南](https://learn.chatgpt.com/docs/customization/agents-md)
+- [Codex 高级配置与项目指令发现](https://learn.chatgpt.com/docs/config-file/config-advanced#project-instructions-discovery)
+- [Codex Memories](https://learn.chatgpt.com/docs/customization/memories)
