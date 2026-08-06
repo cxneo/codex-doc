@@ -1,0 +1,10 @@
+# 教学用保守起点。复制到真实项目后逐项审查。
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+
+[features]
+hooks = true
+

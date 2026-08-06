@@ -1,0 +1,35 @@
+# Rules govern commands that request execution outside the sandbox.
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Pushing changes remote state and requires task-owner approval.",
+    match = [
+        "git push",
+        "git push origin codex/task-filter",
+    ],
+)
+
+prefix_rule(
+    pattern = ["adb", "shell", "pm", "clear"],
+    decision = "forbidden",
+    justification = "Do not automatically erase app data. Confirm device and package, then run manually.",
+    match = [
+        "adb shell pm clear com.example.pockettasks",
+    ],
+)
+
+prefix_rule(
+    pattern = ["./gradlew", ["publish", "publishRelease", "uploadArchives"]],
+    decision = "prompt",
+    justification = "Artifact publication must use the protected release workflow.",
+    match = [
+        "./gradlew publish",
+        "./gradlew publishRelease",
+        "./gradlew uploadArchives",
+    ],
+    not_match = [
+        "./gradlew :app:assembleDebug",
+    ],
+)
+

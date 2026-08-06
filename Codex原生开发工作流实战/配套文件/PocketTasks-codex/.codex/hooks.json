@@ -1,0 +1,19 @@
+{
+  "description": "PocketTasks safety hooks",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/pre_tool_use.py\"",
+            "statusMessage": "Checking Android command policy",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+

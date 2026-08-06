@@ -1,0 +1,4 @@
+interface:
+  display_name: "Android Code Review"
+  short_description: "Review Android changes for architecture and platform risks"
+  default_prompt: "Use $android-code-review to review the current Android diff and report evidence-backed findings."
