@@ -17,7 +17,8 @@
 - Android SDK Platform 35；
 - 可选：Android Studio 和 API 35 模拟器；
 - Git；
-- Codex CLI，仅在练习 Codex 章节时需要。
+- Python 3.11+，用于课程校验和 Hook 黑盒测试；
+- Codex CLI，用于交互练习、Rules 决策和课程完整校验。
 
 项目使用 Gradle Wrapper。不要依赖全局 Gradle。
 
