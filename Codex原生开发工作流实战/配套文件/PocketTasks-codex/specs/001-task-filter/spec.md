@@ -89,8 +89,8 @@ Then 继续显示已有的首次创建引导
 | 验收行为 | 证据 | 环境 |
 |---|---|---|
 | 三种规则与排序 | `TaskFilterTest` | JVM |
-| 偏好默认、读写与未知值 | Preferences Repository 测试 | JVM |
-| 完成任务后列表更新 | `TasksViewModelTest` | JVM |
+| 偏好默认、读写与未知值 | `FilterPreferences` 测试 | JVM |
+| 完成任务后列表更新 | `TaskRepositoryTest` / `TaskViewModel` 测试 | JVM |
 | 控件语义与两类空状态 | Compose UI 测试 | emulator / device |
 | Activity 重建与冷启动 | 仪器测试或记录的人工步骤 | emulator / device |
 | 静态质量与构建 | `lintDebug`、`assembleDebug` | local / CI |
@@ -98,4 +98,3 @@ Then 继续显示已有的首次创建引导
 ## 未决问题
 
 无。产品行为已确认。
-

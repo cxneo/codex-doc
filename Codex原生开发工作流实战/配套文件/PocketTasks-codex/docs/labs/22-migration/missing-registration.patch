@@ -1,0 +1,11 @@
+diff --git a/app/src/main/java/com/example/pockettasks/PocketTasksApplication.kt b/app/src/main/java/com/example/pockettasks/PocketTasksApplication.kt
+index 780958c..9ae1d2e 100644
+--- a/app/src/main/java/com/example/pockettasks/PocketTasksApplication.kt
++++ b/app/src/main/java/com/example/pockettasks/PocketTasksApplication.kt
+@@ -14,6 +14,5 @@ class PocketTasksApplication : Application() {
+             PocketTasksDatabase::class.java,
+             "pockettasks.db",
+         )
+-            .addMigrations(PocketTasksDatabase.MIGRATION_1_2)
+             .build()
+     }

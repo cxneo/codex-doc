@@ -58,7 +58,7 @@ BUILD SUCCESSFUL
 
 ```bash
 git switch -c codex/lab-19-tdd
-git apply docs/labs/19-tdd/red-baseline.patch
+./scripts/lab-patch.sh apply 19-tdd
 ```
 
 补丁只移除“隐藏归档任务”的实现，保留对应测试，因此会产生一个原因明确的失败。练习结束后可以丢弃该练习分支，不影响课程基线。
@@ -84,10 +84,11 @@ git apply docs/labs/19-tdd/red-baseline.patch
 
 ```bash
 ./gradlew :app:testDebugUnitTest \
-  --tests 'com.example.pockettasks.model.TaskFilterTest'
+  --tests 'com.example.pockettasks.model.TaskFilterTest' \
+  --rerun-tasks
 ```
 
-应用 RED 补丁后，归档用例应失败，核心信息类似：
+应用 RED 补丁后，归档用例应失败。`--rerun-tasks` 防止已有编译缓存制造假绿，核心信息类似：
 
 ```text
 TaskFilterTest > all hides archived tasks but keeps active and completed tasks FAILED
@@ -287,7 +288,7 @@ ADD COLUMN archived INTEGER NOT NULL DEFAULT 0
 
 ## 本讲练习
 
-1. 在练习分支应用 `red-baseline.patch` 并复现失败。
+1. 在练习分支用 `./scripts/lab-patch.sh apply 19-tdd` 应用 RED 补丁并复现失败。
 2. 只修改 `TaskFilter.kt` 使目标测试变绿。
 3. 使用 `/diff` 检查改动半径。
 4. 运行 JVM 测试、Lint 和 assemble。

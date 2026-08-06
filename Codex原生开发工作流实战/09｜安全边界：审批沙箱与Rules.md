@@ -1,34 +1,21 @@
-# 09｜安全边界：审批、沙箱与 Rules
+# 09｜安全边界：审批、沙箱、Permissions 与 Rules
 
-前面几讲一直在增强 Codex 的理解力。现在要反过来问：一个理解项目、能执行命令的 Agent，最坏能造成什么后果？
+Codex 能执行 Shell、操作设备和连接外部工具。安全不能靠提示词里的“请小心”，而要把人的决定、系统能力和团队政策分开。
 
-它可能误删文件、改动仓库外内容、把密钥带入日志、向错误环境发布构建，或者把一个看似普通的 Gradle task 连到外部服务。安全不能依赖“提示词里说一句请小心”，而要由几层独立机制共同承担。
+## 四个概念不要混用
 
-## 三道边界解决三个问题
+| 机制 | 回答的问题 |
+|---|---|
+| Approval / reviewer | 越界动作由人审，还是交给自动审查 |
+| Sandbox / permission profile | 本地命令真正能读写哪些文件、访问哪些网络 |
+| Rules / execpolicy | 某类命令应允许、询问还是禁止 |
+| `requirements.toml` | 组织管理员强制哪些边界，用户不能覆盖 |
 
-审批回答“这一次是否由人放行”；沙箱回答“即使执行，最多能触达哪里”；Rules 回答“某类命令按团队政策应该允许、询问还是禁止”。
+改变 reviewer 不会扩大沙箱。例如桌面应用的 **Approve for me / Auto-review** 仍受同一工作区边界；只是越界请求由自动审查处理。**Full access** 则改变实际触达范围，是另一回事。
 
-```text
-Rules：这类动作符合政策吗？
-   ↓
-Approval：这次动作需要人确认吗？
-   ↓
-Sandbox：动作真正能访问什么？
-```
+## 旧式沙箱配置与新版 Permission Profiles
 
-三者不能互相替代。审批可能被疲劳点击，沙箱不理解业务语义，Rules 也无法列出所有未知风险。多层防护的价值，就是一层失误时还有下一层。
-
-## 沙箱：先限制物理能力
-
-常见沙箱模式包括：
-
-- `read-only`：适合代码调查和审查，不允许工作区写入；
-- `workspace-write`：允许在工作区内修改，适合大多数本地开发；
-- `danger-full-access`：限制最少，只应在明确理解环境与任务时使用。
-
-Android 构建会写入模块 `build/`、Gradle 缓存，并可能访问网络下载依赖。最小权限不一定等于完全只读，而是给当前任务刚好够用的范围。
-
-团队常用起点可以放在受信任项目的 `.codex/config.toml`：
+课程项目为了兼容广泛客户端，使用：
 
 ```toml
 approval_policy = "on-request"
@@ -38,49 +25,73 @@ sandbox_mode = "workspace-write"
 network_access = false
 ```
 
-首次需要下载依赖时再显式放行网络，比长期默认开放更容易看清行为。注意，项目级配置只有在项目被信任后才会生效。
+常见沙箱预设：
 
-## 审批：读懂请求，而不是训练手速
+- `read-only`：调查、评审；
+- `workspace-write`：写工作区和允许的临时位置；
+- `danger-full-access`：移除本地沙箱限制，只用于明确隔离环境。
 
-看到审批请求时，按下面顺序读：命令、工作目录、参数中的目标、网络或凭据、可逆性。
+新版 Codex 还提供 beta Permission Profiles，把文件系统规则和网络规则组合成命名策略；内置 `:read-only`、`:workspace`、`:danger-full-access`。它适合组织定义“Android 项目只写这些根目录、只访问这些依赖域名”的最小权限。
 
-PocketTasks 中，以下动作风险明显不同：
+两套配置不能混用：如果任何活动配置或 CLI 参数出现 `sandbox_mode`，Codex 使用旧式沙箱，而不是 `default_permissions`。团队迁移到 Profiles 前必须统一 Codex 版本、移除旧字段并验证有效权限。
+
+用 `/permissions` 查看当前可选模式；用 `/debug-config` 查实际来自哪一层。
+
+## 配置优先级和项目信任
+
+用户配置在 `~/.codex/config.toml`，项目可以从仓库根到当前目录逐层提供 `.codex/config.toml`，离当前目录更近的项目层优先。CLI 覆盖和组织要求还会参与最终解析。
+
+项目只有被信任后，项目 `.codex/` 配置、Hooks 和 Rules 才会加载。不信任项目时，用户与系统层仍然存在。信任只是允许项目配置参与，不等于自动批准每条命令。
+
+## Android 审批要看目标，不只看命令名
 
 ```text
-./gradlew :app:testDebugUnitTest      本地验证，常规写 build 目录
-./gradlew :app:connectedDebugAndroidTest  会操作连接设备
-adb shell pm clear com.example...     会清除设备上的应用数据
-./gradlew publishRelease              可能向外部仓库发布
-git push                              改变远端状态
+./gradlew :app:testDebugUnitTest         写 build，可能下载依赖
+./gradlew :app:connectedDebugAndroidTest 操作已连接设备
+adb shell pm clear <package>             清除指定设备上的应用数据
+./gradlew publishRelease                 可能发布制品
+git push                                 改变远端状态
 ```
 
-“都是开发命令”不是足够细的分类。尤其在连接了个人真机、生产 Firebase 项目或签名环境时，目标比命令名字更重要。
+连接个人真机、生产 Firebase 项目或签名环境时，相同命令会有更高风险。审批时读取命令、cwd、文件目标、网络目标、设备序列号、凭据和可逆性。
 
-## Rules：把重复判断写成政策
+## 网络不是简单的开与关
 
-Codex 的 Rules 使用 `.rules` 文件按命令前缀匹配。它们目前属于实验能力，语法可能演进；下面展示的是思路与当前形式：
+Android 首次构建经常需要 Gradle Plugin Portal、Google Maven、Maven Central 或组织镜像。默认关闭网络可以先暴露依赖是否已缓存；需要联网时，只开放批准域名和方法。
+
+不要把开放网络当成解决所有 Gradle 问题的第一步。先确认：
+
+- 项目声明了哪些仓库；
+- 组织是否要求内部代理；
+- 第三方镜像是否经过供应链审查；
+- 构建脚本和依赖生命周期代码是否可信；
+- 下载后能否回到更窄权限。
+
+Permission Profiles 的网络代理与 allowlist 能提供更细粒度控制，但配置仍在 beta；按当前官方文档验证平台支持，不照抄旧截图。
+
+## Rules：把重复命令判断写成政策
+
+课程 [`default.rules`](./配套文件/PocketTasks-codex/.codex/rules/default.rules) 包含：
 
 ```python
 prefix_rule(
     pattern = ["git", "push"],
     decision = "prompt",
-    justification = "推送会改变远端状态，必须由任务负责人确认",
+    justification = "Pushing changes remote state and requires task-owner approval.",
     match = ["git push", "git push origin codex/task-filter"],
 )
 
 prefix_rule(
     pattern = ["adb", "shell", "pm", "clear"],
     decision = "forbidden",
-    justification = "禁止自动清除设备应用数据；请由开发者确认设备与包名后手工执行",
+    justification = "Confirm device and package, then run manually.",
     match = ["adb shell pm clear com.example.pockettasks"],
 )
 ```
 
-`match` 与 `not_match` 是规则的内联测试，可以帮助发现前缀写错。多条规则命中时采用更严格的决定：`forbidden` 高于 `prompt`，`prompt` 高于 `allow`。
+`match` 与 `not_match` 是内联样例；多条命中时采用最严格决定。不要允许全部 `./gradlew`：自定义 Task 可以下载、签名、上传或执行任意插件逻辑。
 
-不要轻易写一个很宽的允许规则，例如允许全部 `./gradlew`。Gradle task 可以执行任意插件逻辑，测试、签名、发布的风险完全不同。对稳定、无外部副作用的具体 task 建立规则更合理。
-
-可以用下面的命令检查规则怎样裁决：
+`codex execpolicy` 当前是 preview，但可以在保存前测试：
 
 ```bash
 codex execpolicy check --pretty \
@@ -88,35 +99,49 @@ codex execpolicy check --pretty \
   -- git push origin codex/task-filter
 ```
 
-## Android 项目的风险分级
+Rules 适合固定前缀。需要检查分支、包名、设备或文件内容时，使用第 11 讲的 Hook，并给 Hook 写自动测试。
 
-建议团队把操作分成三档，而不是维护一张无限增长的命令黑名单。
+## 组织政策：`requirements.toml`
 
-低风险：读取文件、`rg` 搜索、目标单元测试、查看 diff。它们通常可以在沙箱内自动执行。
+Business / Enterprise 管理员可以约束审批策略、沙箱或 Permission Profiles、网络、MCP、Hooks、插件来源等敏感设置。若用户配置冲突，Codex 回退到兼容值并提示，用户不能在项目中绕过。
 
-中风险：写源码、下载依赖、启动模拟器、执行全量仪器测试。允许执行，但需要清楚资源和环境影响。
+管理员可以只允许 `:read-only` 与 `:workspace`，禁止 full access；也可以要求只加载受管 Hooks，或按 MCP 名称和身份做 allowlist。项目 `AGENTS.md` 不能替代这些强制控制。
 
-高风险：清数据、修改签名与密钥、发布制品、操作生产后台、推送或合并远端。默认要求人工确认，有些应直接禁止 Agent 执行。
+## 一套 Android 风险分级
 
-## 安全也包括提示词数据
+| 等级 | 示例 | 默认处理 |
+|---|---|---|
+| 低 | 读源码、`rg`、查看 diff、目标 JVM 测试 | 沙箱内自动 |
+| 中 | 写源码、下载依赖、启动模拟器、仪器测试 | 明确环境与目标 |
+| 高 | 清数据、读取签名、发布、生产后台、push/merge | 人工审批或禁止 |
 
-即使命令没有破坏性，输入上下文仍可能包含敏感信息。不要让 Codex 读取 `local.properties`、签名文件、服务账号 JSON 或真实用户数据。凭据通过环境或专门的秘密管理系统提供，错误日志在分享前脱敏。
+这个表不是永恒规则。企业设备、个人真机和隔离 CI 的风险不同，团队要写明适用环境。
 
-如果接入 MCP 或 Plugin，数据边界会进一步扩大。第 12 讲会专门处理“能连接外部系统”之后的权限问题。
+## 数据边界同样重要
+
+默认拒绝读取：`local.properties`、签名文件、服务账号 JSON、生产数据库、真实用户日志。凭据通过专门秘密系统提供，日志先脱敏；MCP、Plugin、Browser 和 Computer Use 都可能把数据带出仓库，需要单独审批。
+
+## 动手验证
+
+```bash
+cd 配套文件/PocketTasks-codex
+codex execpolicy check --pretty \
+  --rules .codex/rules/default.rules \
+  -- adb shell pm clear com.example.pockettasks
+python3 .codex/hooks/test_pre_tool_use.py
+```
+
+前者验证固定政策，后者验证上下文门禁。若本机 CLI 版本不支持 preview `execpolicy`，记录为版本限制，不要把“命令不存在”写成规则通过。
 
 ## 小结
 
-安全工程的目标不是让 Codex 什么都做不了，而是让能力与任务风险匹配：沙箱限制触达范围，审批保留人的决定权，Rules 把重复决定变成政策。
+审批决定谁放行，沙箱或 Permission Profile 限制真实能力，Rules 处理可预测命令，Hooks 处理上下文，管理员要求提供不可绕过的组织边界。它们叠加后，Codex 才能在 Android 工程里既有用又可控。
 
-下一讲我们会处理另一种风险：多个任务同时改同一仓库时，怎样用 Git 分支和 Worktree 隔离现场，并随时回到可靠状态。
-
-## 思考题
-
-1. 你们 Android 环境里，哪条看似普通的命令可能触达生产或真实设备数据？
-2. 哪些动作应该“每次询问”，哪些应该“永远禁止自动执行”？
+下一讲会处理另一类边界：多个任务同时工作时，用 Worktree 隔离源码、构建输出和未提交状态。
 
 ## 延伸阅读
 
-- [Codex 安全与审批](https://developers.openai.com/codex/security/)
+- [Codex sandbox and approvals](https://developers.openai.com/codex/security/)
+- [Codex Permissions](https://developers.openai.com/codex/permissions/)
 - [Codex Rules](https://developers.openai.com/codex/rules/)
-
+- [Managed configuration](https://developers.openai.com/codex/enterprise/managed-configuration/)

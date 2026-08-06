@@ -1,109 +1,138 @@
 # 14｜协作分工：用 Subagents 拆解复杂任务
 
-一个跨层 Android 问题可能同时需要追踪 Compose 状态、检查 Room 查询、分析协程调度并评估测试缺口。如果一个 Agent 依次做完所有调查，会话会变长，注意力也会在不同问题间来回切换。
+一个 Android 改动可能同时涉及 Compose、协程、Room 和测试。把全部日志和探索过程塞进主会话，会让需求和关键决策被噪音淹没。Subagent 的作用，是把独立调查放到单独线程，再把结论浓缩回主线程。
 
-Subagent 允许主 Agent 把边界清晰的子任务交给不同角色，再汇总结果。但并行不是免费午餐：切分错误会导致重复阅读、结论冲突和修改碰撞。
+这不是“Agent 越多越好”。每个子代理都会独立消耗模型和工具资源；边界不独立时，多代理只会增加冲突和协调成本。
 
-## 把主 Agent 当成技术负责人
+## 什么适合并行，什么不适合
 
-主 Agent 应保留目标、边界与最终整合。Subagent 更像临时专家，负责一个可独立回答的问题。
+适合先并行的是读密集任务：
 
-PocketTasks 出现“快速连续点击完成后，列表偶尔回退”的缺陷，可以这样拆：
+- 一个 Agent 追踪 Compose 状态与生命周期；
+- 一个 Agent 检查 Room 迁移和数据安全；
+- 一个 Agent 盘点测试缺口与实际可运行命令；
+- 主 Agent 保留 Spec、取舍和最终合并判断。
 
-```text
-主 Agent：维护问题定义、整合证据、提出最终方案
-├── explorer：追踪 UI 事件与 ViewModel 状态时序（只读）
-├── explorer：追踪 Repository、Room 写入和 Flow 失效（只读）
-└── reviewer：检查现有测试为何没有捕获竞争条件（只读）
+不适合直接并行的是：三个 Agent 同时改 `TaskViewModel.kt`、同一份 Version Catalog 或同一 Room Schema。先并行调查，再由一个执行者修改，通常更可靠。
+
+```mermaid
+flowchart LR
+    M["主 Agent：合同与决策"] --> E["Explorer：数据流证据"]
+    M --> R["Reviewer：Android 风险"]
+    M --> T["Worker：验证矩阵"]
+    E --> M
+    R --> M
+    T --> M
+    M --> I["单一执行者：实施与验证"]
 ```
 
-三个任务都能独立调查，输出文件路径与假设。主 Agent 收到结果后先解决矛盾，再决定是否进入实现。
+## Codex 中怎样触发 Subagent
 
-## 什么是好的委派边界
-
-一个合适的子任务满足四个条件：目标单一、输入明确、输出可验、无需频繁与其他任务同步。
-
-例如：
+当前 Codex CLI、桌面应用和 IDE 扩展都能显示子代理活动。最可靠的触发方式是明确提出委派，也可以让适用的 `AGENTS.md` 或 Skill 规定必须委派。
 
 ```text
-调查 TaskRepository.completeTask 的所有调用者与线程上下文。
-只读，不修改文件。输出：调用链、相关测试、可能竞争点，以及每个结论的路径和行号。
+请使用三个并行 Subagent，只读审查当前分支相对 main 的改动：
+1. android-explorer：追踪 UI 事件到 Room 的状态与数据流；
+2. android-reviewer：检查 Compose 生命周期、协程、Room 和无障碍缺陷；
+3. worker：只运行已有验证并区分通过、失败、跳过与环境不可用。
+等待全部结果后，由主 Agent 去重、核验证据并给出一份结论。
+任何 Agent 都不要修改文件。
 ```
 
-而“把这个功能全部做好”不是子任务，它只是把主 Agent 的责任转手，边界和完成标准都没有变清楚。
+在 CLI 中使用 `/agent` 查看和切换 Agent 线程。桌面应用可打开子代理线程；IDE 在支持时会显示后台 Agent 面板。也可以直接要求 Codex停止或继续某个子代理。
 
-## Codex 的内置与自定义 Agent
+## 内置 Agent 与项目自定义 Agent
 
-Codex 提供通用的 `default`、执行型 `worker` 和只读探索型 `explorer`。项目还可以在 `.codex/agents/*.toml` 定义角色，例如 Android 审查者：
+Codex 提供三个内置角色：
+
+- `default`：通用后备；
+- `worker`：偏实现与修复；
+- `explorer`：偏只读探索。
+
+个人自定义 Agent 放在 `~/.codex/agents/`，项目 Agent 放在 `.codex/agents/`。课程项目提供：
+
+- [`android-explorer.toml`](./配套文件/PocketTasks-codex/.codex/agents/android-explorer.toml)
+- [`android-reviewer.toml`](./配套文件/PocketTasks-codex/.codex/agents/android-reviewer.toml)
+
+一个最小自定义 Agent 包含：
 
 ```toml
 name = "android-reviewer"
-description = "Read-only reviewer for Android architecture and regression risks"
+description = "Read-only reviewer for Android correctness and platform risks"
 sandbox_mode = "read-only"
 
 developer_instructions = """
-Review only the assigned scope. Trace Android lifecycle, Compose state,
-coroutines, Room persistence, and verification gaps. Do not modify files.
-Return prioritized findings with precise evidence; say explicitly when none exist.
+Review the assigned diff without editing files. Read project instructions,
+the relevant spec, and the complete diff. Report evidence-backed findings.
 """
 ```
 
-`name`、`description` 和 `developer_instructions` 是角色的核心。description 要帮助主 Agent 判断何时委派；指令要约束范围与输出。只读角色再加 `sandbox_mode = "read-only"`，让权限和职责一致。
+`name`、`description`、`developer_instructions` 是必需字段；文件名只是惯例，真正身份来自 `name`。没有必要在课程里锁死某个模型名称，让 Agent 默认继承父会话即可。
 
-会话中可以用 `/agent` 查看或切换 Agent 线程。你也可以在请求中直接要求合适的委派；但是否并行应由任务结构决定，而不是为了显得“多 Agent”。
+## 并发和默认值放在哪里
 
-## 哪些工作不应并行
+全局设置位于配置的 `[agents]`：
 
-下面这些情况更适合串行：
+```toml
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3
+```
 
-- 子任务依赖上一步尚未确定的架构决定；
-- 多个 Agent 必须修改同一文件；
-- 问题很小，协调成本大于调查成本；
-- 数据库迁移顺序、版本号等需要单一事实源；
-- 权限、发布或破坏性操作需要统一人工授权。
+还可以配置子代理默认模型与推理强度，但越具体越需要团队维护版本和成本策略。并发上限限制的是子代理线程，不包括主线程。
 
-即使需要并行修改，也应给每个 Agent 独立 Worktree 和互斥文件范围，最后由一个负责人整合并运行组合验证。
+## 权限不是每个 Agent 各自随意选择
 
-## 防止三个常见陷阱
+Subagent 继承父轮次当前的沙箱和审批模式，包括通过 `/permissions` 临时改变的实时设置。自定义 Agent 可以进一步声明 `sandbox_mode = "read-only"`，但不能把父级没有授权的能力凭空扩大。
 
-### 结果无法合并
+这带来三个操作规则：
 
-所有子任务使用相同输出结构：已确认事实、证据位置、假设、未决问题、建议下一步。主 Agent 就能横向比较。
+1. 委派前先设置父会话权限；
+2. 调查与评审 Agent 显式只读；
+3. 非交互环境无法弹出新审批时，需要额外权限的动作会失败并返回主流程。
 
-### 重复探索
+CLI 即使当前停留在主线程，也可能弹出另一个 Agent 的审批。审批界面会标明来源；先打开来源线程看清命令和上下文，再决定是否放行。
 
-在委派前划分组件或问题维度，并告诉每个 Agent 哪些内容不在其范围内。不要让三个人都“全面调查”。
+## 子任务合同必须能独立完成
 
-### 把判断外包给多数票
+一个好委派要写清五件事：
 
-三个 Agent 得出同一结论也不等于正确。主 Agent 必须回到代码、测试和平台文档，特别是结论冲突时。多 Agent 增加的是搜索带宽，不是事实权威。
+| 字段 | PocketTasks 示例 |
+|---|---|
+| 范围 | 只读 `data/`、Schema 和迁移测试 |
+| 问题 | v1→v2 是否保留任务并注册到生产 builder |
+| 输出 | 结论、路径与行号、未知项、下一步 |
+| 权限 | 不改文件，不清数据库，不启动发布 |
+| 汇合 | 等待全部结果，由主 Agent 去重核验 |
 
-## 一次完整的缺陷调查
+“帮我看看数据库”范围太宽；“分析整个项目并直接修好”又把调查、决策和写入混在一起。
 
-主 Agent 可以按下面流程组织：
+## 一次真实练习
 
-1. 复述症状和可复现条件；
-2. 先做一次浅层扫描，识别可独立调查的边界；
-3. 给只读 Subagents 分配 UI、数据与测试任务；
-4. 收集结果，标出一致与冲突；
-5. 主 Agent 复核关键证据并形成根因假设；
-6. 只有根因足够确定后，才另起实现步骤；
-7. 最后运行能覆盖组合行为的测试。
+在课程项目根目录启动 Codex，先用 `/permissions` 选择只读，然后提交：
 
-注意第六步：调查授权不自动包含修复授权。对于代码评审或诊断任务，Subagent 不应顺手改代码。
+```text
+使用两个 Subagent 并行完成只读调查，并等待两者结束：
+- android-explorer：追踪筛选从 Compose 点击到 DataStore，再回到 uiState 的路径；
+- android-reviewer：检查 Room v1→v2 迁移类、Schema、测试和生产注册是否一致。
+每个结论必须带文件路径；不要修改文件，不要运行设备数据清理命令。
+最后由主 Agent 输出：共同事实、分歧、未验证项和最小下一步。
+```
+
+验收时检查：子代理是否真的分成两个线程；是否都保持只读；主 Agent 是否核对而非简单拼接；是否把“未运行设备测试”准确写出。
+
+## 何时退回单 Agent
+
+出现以下任一情况，改用单 Agent：任务只需几十秒；所有工作都触碰同一文件；下一步依赖上一步的结论；决策频繁需要用户确认；并行成本大于等待成本。
 
 ## 小结
 
-Subagents 适合扩大彼此独立的探索与执行带宽。主 Agent 负责目标和整合，子任务必须边界清楚、输出一致、权限最小。并行工作的价值来自良好拆分，而不是 Agent 数量。
+Subagent 的核心不是数量，而是上下文隔离和清晰汇合。先把独立、读密集的任务委派出去，权限从父会话收紧，最后由主 Agent 对证据负责；写密集修改则优先交给单一执行者。
 
-下一讲，我们会把交互式协作带出终端：使用 `codex exec`、SDK 和 CI，在没有人持续对话的环境中运行结构化任务。
-
-## 思考题
-
-1. 你最近处理的一个 Android 缺陷，能拆成哪两个互不依赖的只读调查？
-2. 哪个最终决定必须由主 Agent 或人统一做出？
+下一讲将把同样的边界带进非交互环境：没有人守在终端时，`codex exec` 怎样输出机器可读结果、怎样限制权限、怎样安全进入 CI。
 
 ## 延伸阅读
 
 - [Codex Subagents](https://developers.openai.com/codex/subagents/)
+- [课程自定义 Agents](./配套文件/PocketTasks-codex/.codex/agents/android-reviewer.toml)
 

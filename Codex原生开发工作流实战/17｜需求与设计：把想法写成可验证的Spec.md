@@ -11,12 +11,13 @@
 我们给 Codex 的第一条请求是：
 
 ```text
-读取 AGENTS.md、docs/constitution.md 和 specs/000-template/spec.md。
+先用 /plan 进入计划模式。读取 AGENTS.md、docs/constitution.md 和
+specs/000-template/spec.md。
 先不要修改产品代码。
 
 调查 PocketTasks 当前任务列表：
-- TasksScreen 如何渲染列表与空状态；
-- TasksViewModel 的 uiState 和事件；
+- PocketTasksScreen 如何渲染列表与空状态；
+- TaskViewModel 的 uiState 和事件；
 - Repository / Room 如何提供任务流；
 - 是否已有 DataStore 或 SavedStateHandle；
 - 相关单元测试与 Compose 测试。
@@ -24,6 +25,16 @@
 每个结论给文件路径。然后列出实现“全部 / 进行中 / 已完成筛选并记住选择”
 之前必须由产品或工程确认的问题，不要自行回答。
 ```
+
+`/plan` 让本轮聚焦调查和路线，不是承诺永远不写文件。计划完成后仍要由人批准，再进入实现。若任务跨越多天，可同时用 `/goal` 保存更短的持续目标：
+
+```text
+/goal
+把任务筛选需求澄清成可验证 Spec；完成条件是行为、非目标、异常和证据映射
+均无未决歧义。本阶段不修改 Kotlin、Gradle 或 Room Schema。
+```
+
+Goal 保持方向，不替代版本控制中的 Spec，也不会扩大权限。
 
 为什么把调查放在提问之前？因为问题也需要项目上下文。仓库如果已经使用 DataStore，问“能否引入 DataStore”就是浪费；如果已有两个不同空状态，则应该询问如何复用，而不是重新设计。
 
@@ -116,7 +127,7 @@ Compose 界面不仅要“看见三个选项”，还要能被辅助技术理解
 | 验收行为 | 主要验证 |
 |---|---|
 | 三种筛选规则正确 | TaskFilter 单元测试 |
-| 完成任务后当前列表更新 | TasksViewModel 单元测试 |
+| 完成任务后当前列表更新 | TaskRepository / TaskViewModel 单元测试 |
 | 默认值与持久化恢复 | 偏好存储测试 |
 | 控件可点击、选中语义和空状态 | Compose UI 测试 |
 | 旋转 / 冷启动恢复 | 设备测试或明确人工步骤 |
@@ -131,6 +142,25 @@ Compose 界面不仅要“看见三个选项”，还要能被辅助技术理解
 
 当未决问题会改变用户行为时，停下来等确认。Codex 可以提出选项和影响，却不应假装替产品做了决定。
 
+## 对照课程里的真实产物
+
+完整结果在 [`specs/001-task-filter/spec.md`](./配套文件/PocketTasks-codex/specs/001-task-filter/spec.md)。阅读时做一次反向检查：
+
+```text
+需求原话 → 用户场景 → 验收标准 → 证据类型 → 计划中的实现边界
+```
+
+配套项目是教学基线，不代表 Spec 每条行为都已经实现。例如“数据库为空”和“当前筛选无结果”必须是两个可观察状态；如果当前 `PocketTasksScreen` 只显示同一句空提示，这应留在任务清单中，不能因为项目可构建就勾成完成。
+
+## 本讲交付检查
+
+- 只修改 Spec 文档，没有产品代码 diff；
+- 所有产品决定都有来源，不由 Codex 默认选择；
+- 生命周期、异常、无障碍和非目标已写清；
+- 每条验收至少有一种可执行或人工证据；
+- `/diff` 中没有无关格式化；
+- 若使用 `/goal`，其内容仍与批准后的 Spec 一致。
+
 ## 小结
 
 这一讲没有写一行 Kotlin，却排除了多个错误方向。一个好 Spec 把模糊形容词变成用户场景，把 Android 生命周期和质量属性写进验收，把非目标变成边界，再把每条行为连到证据。
@@ -142,3 +172,7 @@ Compose 界面不仅要“看见三个选项”，还要能被辅助技术理解
 1. 如果“记住筛选”只要求旋转后恢复，技术方案会怎样变化？
 2. 哪条验收标准最容易被纯 JVM 单元测试遗漏？
 
+## 延伸阅读
+
+- [课程任务筛选 Spec](./配套文件/PocketTasks-codex/specs/001-task-filter/spec.md)
+- [Spec 模板](./配套文件/PocketTasks-codex/specs/000-template/spec.md)

@@ -1,105 +1,164 @@
-# 15｜无人值守：Codex Exec、SDK 与 CI
+# 15｜无人值守：`codex exec`、SDK 与 CI
 
-前面所有场景都有一个人在会话旁边，可以补充问题、批准命令、纠正方向。CI 中没有这种条件：输入必须完整，权限必须预先收紧，输出必须让机器和人都能判断。
+交互会话里，人可以看审批、纠正误解、停止危险命令。脚本与 CI 没有这个缓冲，所以“把 `codex` 放进 Shell”不是自动化方案。可维护自动化必须固定输入、权限、输出合同、凭据边界和失败方式。
 
-`codex exec` 把 Codex 变成非交互执行入口。它不是“把聊天命令换个名字”，而是一种更严格的工作方式。
+## `codex exec` 的基础合同
 
-## 无人值守的三个变化
+最简单的调用是：
 
-第一，不能依赖临场追问。任务必须提前写清目标、范围、允许动作和失败方式。
+```bash
+codex exec "只读总结这个 Android 仓库的模块与验证命令"
+```
 
-第二，默认倾向更安全。`codex exec` 默认使用只读沙箱；确实需要改工作区时，显式使用 `--sandbox workspace-write`。
+默认情况下：
 
-第三，输出要结构化。人类可以读一段散文，流水线需要稳定字段、退出状态和可保存产物。
+- 运行在只读沙箱；
+- 进度写到 stderr；
+- 最终 Agent 消息写到 stdout；
+- 必须位于 Git 仓库中，除非你明确使用 `--skip-git-repo-check`；
+- 复用 CLI 已保存的认证与正常配置层。
 
-## 从只读审查开始
+因此下面的重定向只保存最终消息，终端仍可看到进度：
 
-最适合进入 CI 的第一项 Codex 能力不是自动改代码，而是只读评审：
+```bash
+codex exec "生成最近十个提交的发布说明" > release-notes.md
+```
+
+不希望保存会话 rollout 文件时使用 `--ephemeral`。临时执行更干净，但也不要指望之后恢复这次会话。
+
+## 三种 stdin 用法不要混淆
+
+提示词作为参数，stdin 是补充上下文：
+
+```bash
+./gradlew :app:testDebugUnitTest 2>&1 \
+  | codex exec "只读分析失败日志，列出根因假设和下一条最小验证"
+```
+
+整个 stdin 就是提示词：
+
+```bash
+codex exec - < .github/codex/prompts/review.md
+```
+
+动态程序生成完整提示词：
+
+```bash
+generate-review-prompt.sh | codex exec - --json > review-events.jsonl
+```
+
+`-` 让意图更清楚，避免以后修改管道时误把日志当成指令。
+
+## 机器读取需要两类输出
+
+`--json` 会把运行期间的事件作为 JSON Lines 写到 stdout，包括线程、轮次、命令、文件变更和错误。它适合日志处理：
+
+```bash
+codex exec --json "只读盘点项目风险" | jq -c 'select(.type == "turn.completed")'
+```
+
+如果下游只需要稳定的最终对象，使用 `--output-schema`。课程项目提供 [review-schema.json](./配套文件/PocketTasks-codex/.github/codex/review-schema.json)，固定四个字段：摘要、发现、实际检查、残余风险。
 
 ```bash
 codex exec \
-  "使用 \$android-code-review 审查当前分支相对 main 的 Android 改动。不要修改文件；按严重程度输出发现，并列出验证缺口。"
+  --sandbox read-only \
+  --output-schema .github/codex/review-schema.json \
+  --output-last-message build/reports/codex/review.json \
+  "只读审查当前工作区，不要修改文件"
 ```
 
-因为默认只读，即使任务描述有歧义，也不会直接改变仓库。先观察它在真实 PR 上的准确性和噪音，再决定是否作为必过检查。
+`--output-schema` 约束最终回答的形状，不保证其中每条判断都正确。仍要验证文件、行号和命令证据。
 
-## JSONL 与结果 Schema
+## 课程中的可执行只读审查脚本
 
-加上 `--json` 后，Codex 会输出 JSON Lines 事件流，适合保存完整执行轨迹：
+[`scripts/codex-readonly-review.sh`](./配套文件/PocketTasks-codex/scripts/codex-readonly-review.sh) 把关键设置写死：
 
 ```bash
-codex exec --json "调查当前 diff 的 Android 回归风险，不修改文件" \
-  > codex-events.jsonl
+cd 配套文件/PocketTasks-codex
+bash -n scripts/codex-readonly-review.sh
+./scripts/codex-readonly-review.sh
 ```
 
-如果下游只需要最终结构，可以通过 `--output-schema` 指定 JSON Schema，并用 `-o` 保存最终消息。例如要求结果包含 `summary`、`findings`、`tests_run` 与 `tests_missing`。
+它使用：
 
-结构化输出的好处不是“更像 API”，而是可以做确定性判断：存在 P0/P1 时阻断，只有建议项时继续，把未运行设备测试清楚展示给评审者。
+- `--ephemeral`：不保留本次 rollout；
+- `--ignore-user-config`：排除个人 `~/.codex/config.toml` 对 CI 的漂移；
+- `--sandbox read-only`：只审查，不写产品代码；
+- `--output-schema`：产出稳定 JSON；
+- `--output-last-message`：将最终对象保存到报告目录。
 
-## 自动修复为何需要更窄的合同
+脚本从自身所在目录解析 Android 项目根，而不是盲目采用外层 Git 根，因此课程项目嵌在文档仓库中或单独分发时都能找到 Schema。
 
-当任务需要写文件时：
+`--ignore-user-config` 只忽略用户配置，不等于忽略项目政策。`--ignore-rules` 会跳过用户和项目 execpolicy Rules，只能在另有等价隔离的受控环境使用，不能为了“让 CI 通过”随手添加。
+
+## 写入自动化要显式升级权限
+
+默认只读是重要安全属性。确实需要生成补丁时：
 
 ```bash
 codex exec --sandbox workspace-write \
-  "只修复指定 Lint 问题；不要修改基线或禁用规则。运行目标 Lint，输出改动与结果。"
+  "修复当前失败的目标单元测试；不要提交、推送或发布"
 ```
 
-写权限只是物理允许，并没有授权推送、发布或访问生产。任务仍应限制问题 ID、文件范围、验证命令和停止条件。遇到需要业务判断、数据库迁移或公开 API 改变时，应失败退出并交给人，而不是猜一个答案。
+`danger-full-access` 只适合已经隔离的 Runner 或容器。旧的 `--full-auto` 是兼容参数，新脚本应使用明确的 `--sandbox`。
 
-## Android CI 的现实分层
+自动化不能弹出新审批时，需额外授权的动作会失败。把失败当成边界反馈，不要自动重试为更高权限。
 
-不是所有验证都放在同一个 Job：
+## 配置、Rules 与必需 MCP
 
-```text
-快速 Job
-  ├── testDebugUnitTest
-  ├── lintDebug
-  └── Codex 只读 diff 审查
+非交互任务最怕“开发者电脑能跑，Runner 不一致”。建议脚本明确：
 
-构建 Job
-  └── assembleDebug / bundleRelease（按分支与密钥策略）
+- 是否读取用户配置；
+- 项目 `.codex/config.toml` 是否受信任；
+- 哪些 Rules 必须生效；
+- 所需 MCP 是否设为 `required = true`。
 
-设备 Job
-  └── connectedDebugAndroidTest 或托管设备
+启用且标记为必需的 MCP 初始化失败时，`codex exec` 会报错退出，而不是悄悄在缺少关键数据源的情况下继续。这比生成一份信息不全但外表完整的报告更安全。
+
+## 会话恢复适合两阶段流水线
+
+交互之外也能继续同一线程：
+
+```bash
+codex exec "只读审查并找出并发问题"
+codex exec resume --last "只修复刚才已经证实的问题，并运行目标测试"
 ```
 
-Codex 可以解释各 Job 的失败和归类风险，但不能把未启动设备导致的跳过写成测试通过。流水线摘要必须区分 passed、failed、skipped 与 not configured。
+也可以使用明确的会话 ID。`--last` 以当前工作目录为边界查找最近会话；跨目录行为不要靠猜。第一阶段如果用了 `--ephemeral`，就没有可恢复的持久会话。
 
-## GitHub Action 与 SDK 的位置
+## CI 凭据必须与仓库代码隔离
 
-在 GitHub Actions 中，可以使用官方 `openai/codex-action` 把任务接入 PR 流程。凭据通过 GitHub Secrets 提供，权限限定到所需范围，来自 Fork 的不受信任代码要特别谨慎。
+GitHub Actions 优先使用 `openai/codex-action@v1`，而不是在执行仓库脚本的整个 Job 中暴露 API Key。课程的 [Codex PR 审查示例](./配套文件/PocketTasks-codex/.github/workflows/codex-pr-review.example.yml) 和 [自动修复示例](./配套文件/PocketTasks-codex/.github/workflows/codex-autofix.example.yml) 展示了两条原则：
 
-如果你需要在内部工具中持续管理线程、处理事件或把 Codex 嵌入更复杂的应用，可以使用 Codex SDK。选择原则很简单：Shell 能清楚表达的单次任务用 `codex exec`；需要程序化会话与深度集成时再使用 SDK。
+1. Codex 生成补丁的 Job 只有只读仓库权限；
+2. 写分支或开 PR 放在另一个不持有 API Key 的 Job。
 
-## 一份可以审计的 CI 合同
+不要把 `OPENAI_API_KEY` 或 `CODEX_API_KEY` 设成会运行不受信任仓库代码的 Job 级环境变量。非 GitHub 环境中如果必须用 API Key，只为单次 `codex exec` 进程注入，并确保同一进程环境不运行仓库生命周期脚本。
 
-在上线前，让团队逐项回答：
+## 何时使用 SDK
 
-- 输入是否来自不受信任的 PR 文本或文件？
-- 沙箱和网络权限是什么？
-- Codex 能否读取 Secrets，是否真的需要？
-- 哪些外部工具可调用，写操作怎样禁止？
-- 输出在哪里保存，是否可能含敏感内容？
-- 超时、失败和限额怎样处理？
-- AI 发现是否直接阻断，还是先以建议运行？
+当你需要多轮线程、应用内事件处理或把 Codex 嵌入自己的服务时，再使用 Codex SDK。简单 CI 任务优先用 `codex exec` 或官方 Action，因为边界更容易审查。
 
-建议先“影子运行”一段时间：结果对评审者可见，但不阻断合并。统计真实发现、误报和耗时后，再决定门禁策略。
+SDK 同样要显式选择沙箱。典型流程是先 `read_only` 计划，再在同一线程用 `workspace_write` 实施，最后恢复 `read_only` 复审。SDK 不会替你设计凭据、审批和验证策略。
+
+## 自动化验收清单
+
+- 输入是否来自固定提示词或受控上下文？
+- 默认是否只读，写入是否显式？
+- stdout 是最终文本、JSONL 事件还是 Schema 对象？
+- 失败时退出并保留诊断，还是吞错继续？
+- API Key 是否与仓库代码和写权限隔离？
+- 产物是建议、补丁还是远端变更？每一步由谁授权？
 
 ## 小结
 
-非交互执行要求任务更明确、权限更小、输出更结构化。`codex exec` 适合一次性自动化，SDK 适合程序化集成，官方 Action 适合 GitHub 工作流。先从只读、非阻断检查开始，再根据证据扩大自动化。
+`codex exec` 把交互任务变成可脚本化接口，但可靠性来自外围合同：最小沙箱、确定输入、结构化输出、明确失败和凭据隔离。课程脚本可以直接执行，也可以作为团队审查 Job 的起点。
 
-至此，我们已经认识了 Codex 的主要零件。下一讲进入课程的转折点：把项目规则、安全机制、专家能力和 SDD 模板装进 PocketTasks 的同一套“开发驾驶舱”。
-
-## 思考题
-
-1. 你们 CI 中哪项检查适合先以只读、非阻断方式引入 Codex？
-2. 哪些 Android 任务无论如何都不应无人值守地自动修复？
+下一讲把前 15 讲的机制装配到一个 Android 项目驾驶舱，说明哪些文件进仓库、哪些设置留在本机、日常任务从哪里进入。
 
 ## 延伸阅读
 
-- [Codex 非交互模式](https://developers.openai.com/codex/noninteractive/)
+- [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
 - [Codex SDK](https://developers.openai.com/codex/sdk/)
-- [Codex GitHub Action](https://developers.openai.com/codex/github-action/)
-
+- [Codex GitHub Action](https://github.com/openai/codex-action)
+- [课程只读审查脚本](./配套文件/PocketTasks-codex/scripts/codex-readonly-review.sh)

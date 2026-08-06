@@ -56,6 +56,8 @@ PocketTasks-codex/
 │       └── androidTest/                 # Compose 与 Migration 测试
 ├── specs/                               # Spec / Plan / Tasks
 ├── docs/constitution.md                 # 课程约定的项目宪法
+├── docs/labs/                           # TDD、审查与迁移故障实验
+├── scripts/codex-readonly-review.sh     # 结构化只读审查示例
 ├── AGENTS.md                            # Codex 项目指令
 ├── .agents/skills/android-code-review/  # Android 审查 Skill
 ├── .codex/                              # 配置、Rules、Hooks、Agents
@@ -98,6 +100,18 @@ sed -n '1,260p' .codex/hooks/pre_tool_use.py
 ```
 
 课程配置使用保守沙箱，网络默认关闭。受信任项目才会加载项目级 Codex 配置；信任项目并不等于以后所有命令都安全。
+
+Hook 可以独立验证，不必启动 Codex：
+
+```bash
+python3 .codex/hooks/test_pre_tool_use.py
+bash -n scripts/codex-readonly-review.sh
+bash -n scripts/audit-cursor-assets.sh
+bash -n scripts/lab-patch.sh
+```
+
+`.worktreeinclude` 只列出被 Git 忽略、但新 Worktree 运行 Android 构建所需的
+`local.properties`。真实项目不要借此复制签名文件或生产密钥。
 
 ## 教学版本
 

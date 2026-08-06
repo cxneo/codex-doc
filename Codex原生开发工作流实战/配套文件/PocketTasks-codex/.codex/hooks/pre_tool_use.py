@@ -35,15 +35,21 @@ def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError):
-        return 0
+        print("Blocked Bash tool call because the hook input was not valid JSON.", file=sys.stderr)
+        return 2
 
     if payload.get("tool_name") != "Bash":
         return 0
 
     tool_input = payload.get("tool_input") or {}
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    if not isinstance(command, str):
-        return 0
+    if not isinstance(tool_input, dict):
+        print("Blocked Bash tool call because tool_input was not an object.", file=sys.stderr)
+        return 2
+
+    command = tool_input.get("command", "")
+    if not isinstance(command, str) or not command.strip():
+        print("Blocked Bash tool call because tool_input.command was missing.", file=sys.stderr)
+        return 2
 
     for pattern, reason in POLICIES:
         if pattern.search(command):
@@ -65,4 +71,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

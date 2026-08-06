@@ -6,13 +6,13 @@
 
 ## 先画出现状，再画目标
 
-Codex 调查发现，任务数据来自 Room：DAO 返回 `Flow<List<TaskEntity>>`，Repository 映射为领域模型，`TasksViewModel` 组合数据并暴露 `StateFlow<TasksUiState>`，Compose 只渲染 UI State。
+Codex 调查发现，任务数据来自 Room：`TaskDao.observeAll()` 返回 `Flow<List<TaskEntity>>`，`TaskRepository` 映射为领域模型并组合筛选，`TaskViewModel` 暴露 `StateFlow<TaskUiState>`，`PocketTasksScreen` 只渲染 UI State。
 
 筛选偏好尚不存在，但项目已有 Preferences DataStore。目标数据流可以画成：
 
 ```text
                      ┌─ Room tasks Flow ───────────┐
-TasksScreen event ─→ TasksViewModel                ├─ combine → TasksUiState → Compose
+PocketTasksScreen event ─→ TaskViewModel          ├─ combine → TaskUiState → Compose
                      └─ DataStore filter Flow ─────┘
                               ↑
                        update filter
@@ -24,11 +24,11 @@ Room 仍然是任务事实源，DataStore 只保存用户偏好。ViewModel 组�
 
 ### 决定一：筛选模型放在哪里
 
-`TaskFilter` 表示界面和偏好层都要理解的稳定概念，可以放在共享 model 包，而不是定义成 Composable 内部枚举。它只包含 `ALL`、`ACTIVE`、`COMPLETED` 和纯过滤语义。
+`TaskFilter` 表示界面和偏好层都要理解的稳定概念，落在 `model/TaskFilter.kt`，而不是定义成 Composable 内部枚举。它只包含 `ALL`、`ACTIVE`、`COMPLETED` 和纯过滤语义。
 
 ### 决定二：用 DataStore，不用 SavedStateHandle
 
-Spec 明确要求冷启动恢复，项目又已有 DataStore。`SavedStateHandle` 更适合保存导航与进程恢复相关状态，不承担长期偏好。复用现有 Preferences Repository，避免 UI 直接访问 DataStore。
+Spec 明确要求冷启动恢复，项目又已有 DataStore。`SavedStateHandle` 更适合保存导航与进程恢复相关状态，不承担长期偏好。通过 `FilterPreferences` 隔离 DataStore，避免 UI 直接访问它。
 
 ### 决定三：是否创建 Use Case
 
@@ -46,10 +46,10 @@ Plan 不应承诺尚未确认的精确行号，但要给出可评审的组件边
 ## 预计改动
 
 - model/TaskFilter.kt：稳定筛选类型与纯过滤规则
-- data/preferences/UserPreferencesRepository.kt：暴露 filter Flow 与更新方法
-- ui/tasks/TasksUiState.kt：增加当前筛选和可见任务
-- ui/tasks/TasksViewModel.kt：组合任务流与筛选流，处理筛选事件
-- ui/tasks/TasksScreen.kt：渲染筛选控件与区分空状态
+- data/FilterPreferences.kt：暴露 filter Flow、默认值、更新与未知值回退
+- data/TaskRepository.kt：组合 Room 任务流与筛选流
+- ui/TaskViewModel.kt：暴露当前筛选和可见任务，处理筛选事件
+- ui/PocketTasksScreen.kt：渲染筛选控件、语义与两类空状态
 - 对应 test / androidTest：行为与界面证据
 
 ## 明确不改
@@ -68,8 +68,8 @@ Plan 不应承诺尚未确认的精确行号，但要给出可评审的组件边
 
 ```text
 1. TaskFilter 纯规则测试
-2. UserPreferencesRepository 测试
-3. TasksViewModel 组合流测试
+2. FilterPreferences 测试
+3. TaskRepository / TaskViewModel 组合流测试
 4. Compose 控件与空状态测试
 5. 全量单元测试 + Lint + Debug 构建
 6. 设备上的重建与冷启动场景
@@ -105,10 +105,10 @@ Plan 列出具体风险与缓解：
 - [ ] T003 为筛选偏好默认值、读写和未知值建立测试
   - 依赖：T002
 
-- [ ] T004 实现 UserPreferencesRepository 的筛选持久化
+- [ ] T004 实现 FilterPreferences 的筛选持久化
   - 依赖：T003
 
-- [ ] T005 为 ViewModel 的组合状态建立失败测试
+- [ ] T005 为 Repository / ViewModel 的组合状态建立失败测试
   - 依赖：T002、T004
 
 - [ ] T006 接入 ViewModel，并保持单一 uiState
@@ -117,7 +117,7 @@ Plan 列出具体风险与缓解：
 - [ ] T007 增加 Compose 筛选控件、语义与两类空状态测试
   - 依赖：T006
 
-- [ ] T008 实现 TasksScreen，并通过 UI 测试
+- [ ] T008 实现 PocketTasksScreen，并通过 UI 测试
   - 依赖：T007
 
 - [ ] T009 执行回归验证并记录结果
@@ -132,6 +132,34 @@ Plan 列出具体风险与缓解：
 
 让同一个会话直接说“我的计划很好”价值有限。独立视角的意义是尝试证伪。
 
+在 Codex 中可以把这一过程分成两个明确轮次：
+
+```text
+/plan
+读取已批准 spec.md、项目宪法和现有实现，只产出 plan.md 与 tasks.md。
+每个技术决定必须给出现状证据、替代方案和验证方式；不要改产品代码。
+```
+
+计划落盘后，再启动只读新会话或委派 `android-reviewer`：
+
+```text
+只读审查 specs/001-task-filter/plan.md 与 tasks.md。
+逐条核对 Spec 验收、项目宪法、真实文件路径、依赖顺序和验证环境。
+不要修改文件；报告缺口与建议的最小修订。
+```
+
+本讲真实产物是 [`plan.md`](./配套文件/PocketTasks-codex/specs/001-task-filter/plan.md) 与 [`tasks.md`](./配套文件/PocketTasks-codex/specs/001-task-filter/tasks.md)。配套源码包含后续章节使用的实现基线，但任务清单保留“教学演练”状态；学习者必须按第 19 讲的 RED 补丁重新生成自己的证据，不能照抄勾选。
+
+## Plan 的完成标准
+
+- 所有路径在当前仓库真实存在，或明确标成待创建；
+- 每项决定都有理由、替代方案或回看条件；
+- “明确不改”足以识别范围越界；
+- 风险写出触发方式和证据，不只写高/中/低；
+- Tasks 可以按依赖逐步执行，每步都有停止点；
+- 设备、网络或凭据要求被标出来；
+- 独立 reviewer 的问题已经处理或记录为未决。
+
 ## 小结
 
 Plan 把用户行为映射为状态所有权、组件边界、风险与验证；Tasks 再把它拆成按依赖排序的小步动作。好的计划解释“为什么”，好的任务说明“做到哪一步可以证明”。
@@ -143,3 +171,7 @@ Plan 把用户行为映射为状态所有权、组件边界、风险与验证；
 1. 如果项目尚未使用 DataStore，引入它与暂时不持久化各有什么代价？
 2. 哪个 Task 最适合成为第一次可独立提交的检查点？
 
+## 延伸阅读
+
+- [课程任务筛选 Plan](./配套文件/PocketTasks-codex/specs/001-task-filter/plan.md)
+- [课程任务清单](./配套文件/PocketTasks-codex/specs/001-task-filter/tasks.md)

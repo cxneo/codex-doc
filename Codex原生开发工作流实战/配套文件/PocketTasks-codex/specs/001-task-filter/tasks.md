@@ -1,9 +1,10 @@
 # 任务列表筛选任务清单
 
-状态：Example / Not executed  
+状态：Teaching exercise / Reset before execution
 关联：`spec.md`、`plan.md`
 
-本文件展示实施顺序，不代表测试已经运行。复制到真实项目后，用实际文件路径和命令结果更新。
+本文件展示实施顺序，不代表学习者已经运行测试。课程源码包含最终教学基线；先按
+`docs/labs/19-tdd/README.md` 应用 RED 补丁，再逐项记录你自己的结果。
 
 - [ ] T001 建立 `TaskFilter` 失败测试
   - 依赖：无
@@ -29,10 +30,10 @@
   - 验证：T003 转绿
   - 结果：未运行
 
-- [ ] T005 建立 ViewModel 组合状态失败测试
+- [ ] T005 建立 Repository / ViewModel 组合状态失败测试
   - 依赖：T002、T004
   - 完成条件：覆盖切换、完成任务后更新、初始值与写失败
-  - 验证：目标 `TasksViewModelTest`
+  - 验证：目标 `TaskRepositoryTest` 与 ViewModel 测试
   - 结果：未运行
 
 - [ ] T006 接入 ViewModel 单一 UI State
@@ -47,7 +48,7 @@
   - 验证：目标设备测试
   - 结果：未运行
 
-- [ ] T008 实现 TasksScreen 筛选 UI
+- [ ] T008 实现 PocketTasksScreen 筛选 UI
   - 依赖：T007
   - 完成条件：语义与两类空状态满足 Spec
   - 验证：T007 转绿
@@ -70,5 +71,4 @@
 
 ## 残余风险
 
-- 这是教学计划，尚未绑定具体 Android 源码和设备环境。
-
+- 这是教学任务记录，必须由学习者重新执行 RED/GREEN 与设备验证，不能把课程作者的基线结果当成自己的结果。

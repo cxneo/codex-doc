@@ -1,0 +1,3 @@
+# Codex 桌面应用创建托管 Worktree 时，复制本机 Android SDK 路径。
+# 不要在这里加入签名文件、服务账号或生产环境密钥。
+local.properties

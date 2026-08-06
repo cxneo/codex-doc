@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": { "enum": ["P0", "P1", "P2", "P3"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "problem": { "type": "string" },
+          "evidence": { "type": "string" }
+        },
+        "required": ["severity", "file", "line", "problem", "evidence"],
+        "additionalProperties": false
+      }
+    },
+    "checks_run": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "residual_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["summary", "findings", "checks_run", "residual_risks"],
+  "additionalProperties": false
+}

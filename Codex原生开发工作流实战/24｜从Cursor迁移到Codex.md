@@ -1,125 +1,174 @@
 # 24｜从 Cursor 迁移到 Codex
 
-Cursor 迁移比 Claude Code 多一层：Cursor 同时是代码编辑器和 Agent 工作环境。团队说“迁移到 Codex”时，可能指更换 Agent，也可能指更换编辑器、远程执行方式或整套规则系统。
+Cursor 同时是编辑器、Agent 和规则运行环境。团队说“迁移到 Codex”时，可能只是更换 Agent，也可能意味着更换编辑器、CLI 自动化、后台环境和权限系统。把这些事情绑在同一天，失败后很难知道是哪一层有问题。
 
-第一步不是卸载 Cursor，而是把这些问题拆开。Android 团队完全可以继续用 Android Studio 做 Preview、Profiler 和设备调试，同时使用 Codex CLI 或桌面应用承担 Agent 工作；编辑器迁移与工程化迁移不必同一天发生。
+Android 团队通常更适合保留 Android Studio 做 Sync、Compose Preview、Profiler、Layout Inspector 和模拟器，同时使用 Codex CLI 或桌面应用处理 Agent 工作。工程资产迁移与编辑器选择可以分开。
 
-## 当前没有 Cursor 一键导入
+## 先说结论：没有 Cursor 一键导入
 
-Codex 的 `/import` 当前面向 Claude Code，不是 Cursor。因此 Cursor 资产应先盘点，再手工转换与验证。不要把 `.cursor` 整个复制到 `.codex`，两边文件名相似的能力也可能使用不同 schema 和生命周期。
+Codex 的 `/import` 当前用于 Claude 资产，不是 Cursor。因此迁移路径是：盘点 → 分类 → 转换 → 双轨验证 → 退役。不要把 `.cursor/` 整个复制到 `.codex/`；即使两边都叫 Rules、MCP 或 Hooks，文件协议和生命周期也不同。
 
-## 资产映射图
+## 第 0 步：冻结新资产，生成清单
 
-| Cursor 资产 | Codex 中的去向 | 注意事项 |
-|---|---|---|
-| `.cursor/rules/*.mdc` | 根或目录级 `AGENTS.md`、宪法、Skills | 按规则类型与作用域重新分流 |
-| 旧 `.cursorrules` | `AGENTS.md` 等 | 先清理；它在 Cursor 中已是旧形式 |
-| `.cursor/commands/*.md` | `.agents/skills/*/SKILL.md` 或任务模板 | 增加触发描述、输入输出与验证 |
-| Cursor Agent Skills | `.agents/skills/` | 检查发现路径与元数据，不假设完全兼容 |
-| `.cursor/mcp.json` | Codex MCP 配置 | 重建认证与工具审批 |
-| `.cursor/hooks.json` | `.codex/hooks.json` | 不能直接复制 schema；重写并测试事件协议 |
-| Background Agents | Codex Cloud 或 App Worktree | 对齐环境、分支、网络与交付方式 |
-| Cursor CLI 自动化 | `codex exec` / SDK / Action | 权限默认值不同，重新设计沙箱 |
+先约定一周内不新增 Cursor 专用规则或命令，避免迁移目标继续移动。课程提供盘点脚本：
 
-如果仓库已经有根 `AGENTS.md`，这是很好的共享起点。Cursor CLI 与 Codex 都能读取它，但仍要验证各自的发现范围和优先级。
-
-## 迁移 Rules：按意图拆，不按文件拆
-
-Cursor Project Rules 有 Always、按 glob 自动附加、Agent Requested 和 Manual 等类型。迁移时逐条问：这究竟是长期项目约束、目录局部约束、任务方法，还是按需参考？
-
-例如：
-
-```text
-Always：所有 ViewModel 暴露不可变 UI State
-  → 根 AGENTS.md
-
-Glob：app/**/data/local/** 发生 Schema 变化时必须写 MigrationTest
-  → database 目录 AGENTS.md，或 Android Review Skill 的 Room reference
-
-Agent Requested：排查 Compose 重组性能时读取的指南
-  → performance Skill 的 reference
-
-Manual：生成发布说明
-  → 显式调用的 Skill
+```bash
+cd 配套文件/PocketTasks-codex
+./scripts/audit-cursor-assets.sh /path/to/your-android-project
 ```
 
-Codex 的 `.codex/rules/*.rules` 主要用于命令执行政策，不是 Cursor Rules 的同名替代品。不要把编码规范塞进 exec policy。
+脚本列出 `.cursor/**`、旧 `.cursorrules`、已有 `AGENTS.md`，并搜索规则元数据、MCP 和 Hook 线索。它不会读取仓库外的个人 Cursor 设置，所以还要人工补充：
 
-## 迁移 Commands：从快捷入口变成能力契约
+- Cursor Settings 中的 User Rules 和 Memories；
+- 团队实际使用的 MCP 身份与工具；
+- CLI/CI 脚本；
+- Background Agent 环境；
+- 只有口头约定、尚未写入仓库的流程。
 
-打开每个 `.cursor/commands/*.md`，删除只对 Cursor UI 或工具名有效的内容，补齐：触发场景、必要输入、读取文件、允许修改范围、停止条件、产物与验证。
+给每项资产记录负责人、使用频率、作用域、是否含凭据、最后验证日期和退役决定。
 
-高频而成熟的流程变成 Skill；只负责初始化 Spec、Plan 或 Tasks 形状的内容可以保留为模板；很少使用或只服务个人的命令不必进入团队仓库。
+## 资产不是一对一改名
 
-迁移后用 `/skills` 检查可发现性，再用显式 `$skill-name` 完成一次真实任务。文件存在不等于 description 能正确触发。
+| Cursor 资产 | Codex 主要去向 | 转换判断 |
+|---|---|---|
+| `.cursor/rules/*.mdc` | `AGENTS.md`、局部 `AGENTS.md`、宪法或 Skill | 按意图和作用域分流 |
+| 旧 `.cursorrules` | 同上，或删除 | 先去重，不保留兼容包袱 |
+| `.cursor/commands/*.md` | Skill 或 Spec/Plan/Tasks 模板 | 补触发条件、输出与验证 |
+| Cursor Agent Skills | `.agents/skills/` | 检查元数据和引用路径，不假设完全兼容 |
+| `.cursor/mcp.json` | Codex MCP 配置 | 重新建认证、必需性和工具审批 |
+| Cursor Hooks | `.codex/hooks.json` + 可测试脚本 | 按 Codex 事件 JSON 重写 |
+| Background Agents | Codex Cloud 或 App Worktree | 对齐 SDK、网络、Secrets、设备和交付 |
+| Cursor CLI 脚本 | `codex exec`、SDK 或 Action | 重设沙箱、输出合同与认证 |
+| User Rules / Memories | 个人 Codex 设置或删除 | 团队事实必须进入仓库 |
 
-## MCP 和 Hooks：语义相似，协议不同
+Codex `.codex/rules/*.rules` 是命令执行政策，不是 Cursor Project Rules 的同名替代。编码规范不能因为都叫 Rule 就塞进 execpolicy。
 
-Cursor 与 Codex 都支持 MCP，但配置位置、认证和工具审批不应假定完全一致。逐个服务重新添加，先启用只读工具，确认身份与作用域，再开放写操作。
+## 第 1 步：逐条迁移 `.mdc`
 
-两边也都有 Hooks，但事件名、输入 JSON、输出协议、超时与信任机制不同。迁移 Hook 的正确方式是：先写清原 Hook 的业务意图，再按 Codex Hooks 文档重写；用样例事件测试；先观察不阻断；最后才启用控制。
+Cursor Project Rules 可以 Always、按 glob 自动附加、由 Agent 判断或手工引用；嵌套 `.cursor/rules` 还能按目录缩小范围。迁移时逐条问：
 
-## Background Agent 怎样映射
+```text
+所有 ViewModel 暴露不可变 StateFlow
+→ 根 AGENTS.md：稳定、全项目工程约束
 
-Cursor Background Agents 通常在远程 Ubuntu 环境和独立 Git 分支工作。Codex 侧可以根据任务选择 Cloud 执行，或在桌面应用中使用本地 Worktree。
+data/local 下改 Room Schema 必须增加 MigrationTest
+→ 该目录的 AGENTS.md，或 Android Review Skill 的 Room reference
 
-不要只比较“都能后台跑”。要逐项对齐：
+排查 Compose 重组性能的方法
+→ performance Skill：只在相关任务加载
 
-- 环境初始化脚本和 Android SDK；
-- JDK、Gradle 与缓存；
-- 网络白名单；
-- Secrets 是否可见；
-- 分支和提交归属；
-- 是否有模拟器或设备能力；
-- 产物怎样回到本地评审。
+生成版本发布说明
+→ 显式 Skill 或自动化脚本，不常驻上下文
 
-对于强依赖 Android Emulator、硬件或本地私有服务的任务，本地 Worktree 可能更直接；纯代码调查和 JVM 测试更容易进入 Cloud。
+已经由 ktlint 确定执行的格式规则
+→ 删除文字规则，交给工具和 CI
+```
 
-## 特别注意非交互权限差异
+转换后不要同时保留两份真相。双轨期可保留原文件，但在清单中标记新位置、冻结日期和删除门槛。
 
-Cursor CLI 的非交互 Agent 与 Codex Exec 可能有不同默认写权限。迁移脚本时，不要假设旧命令在新系统里会“同样执行”。Codex Exec 默认只读，需要修改时显式使用 `--sandbox workspace-write`；网络、MCP 写操作与远端状态仍要单独限制。
+## 第 2 步：把 Commands 变成能力合同
 
-迁移自动化时先跑只读任务，检查 JSON 输出和退出行为，再开放最小写权限。任何自动推送、创建 PR 或发布的步骤都需要独立授权。
+对每个 `.cursor/commands/*.md` 补齐：
 
-## Android 团队的双轨过渡
+1. 什么时候应该触发，什么时候不触发；
+2. 必须读取哪些项目文件；
+3. 输入缺失时是否停止；
+4. 可以修改什么、禁止修改什么；
+5. 产物是什么；
+6. 运行哪些验证；
+7. 遇到设备、凭据或产品决策时怎样交接。
 
-推荐两周双轨，而不是工具大爆炸：
+成熟高频流程进入 `.agents/skills/<name>/SKILL.md`；只定义文档形状的进入 `specs/000-template`；低频个人快捷词可以直接删除。
 
-第一阶段，让 Cursor 与 Codex 共用根 AGENTS.md、项目宪法和 Spec 模板。新建的稳定工作流只进入 `.agents/skills`，避免继续扩大旧 commands。
+迁移后在 Codex 使用 `/skills` 检查发现，再显式调用 `$skill-name` 完成一项真实 Android 任务。文件存在不等于 description 能正确触发。
 
-第二阶段，选一条真实功能线让 Codex 完整执行调查—计划—实现—验证；另一条相似任务保留原流程。比较评审时长、返工、测试证据和权限事件，而不是单看生成速度。
+## 第 3 步：重建外部连接和安全门禁
 
-确认核心合同后，逐步停用重复的 `.cursor` 资产。编辑器是否更换可以由个人和 Android 工具需求另行决定。
+### MCP
+
+Cursor 与 Codex 都支持 MCP，但不要复制 JSON 后假定身份、OAuth、工具名和批准策略不变。逐个服务：
+
+1. 在 Codex 中重新添加；
+2. 先只开放读取工具；
+3. 核对账号、组织与项目范围；
+4. 对写工具设置 prompt 或更严格批准；
+5. 自动化依赖的服务标记为 required，失败时停止。
+
+### Hooks
+
+先写原 Hook 的业务意图，再按 Codex `PreToolUse`、`PostToolUse` 等事件重写。用样例 stdin JSON 做允许与拒绝测试，先观察误报，最后启用阻断。课程的 [`pre_tool_use.py`](./配套文件/PocketTasks-codex/.codex/hooks/pre_tool_use.py) 和 [自动测试](./配套文件/PocketTasks-codex/.codex/hooks/test_pre_tool_use.py) 是最小参照。
+
+### CLI 自动化
+
+Cursor CLI 和 Codex Exec 的非交互权限、输出格式与配置位置不同，并且两边都在演进。不要翻译命令行参数；重新从任务风险设计：Codex Exec 默认只读，写入显式 `--sandbox workspace-write`，结果用 `--json` 或 `--output-schema`，凭据只注入必要进程。
+
+## 第 4 步：选择 Android 的执行环境
+
+| 任务 | 优先环境 | 原因 |
+|---|---|---|
+| Compose Preview、Profiler、设备交互 | Android Studio + Codex Local | 依赖本地图形和设备工具 |
+| 独立功能实现 | Codex App Worktree | 与当前工作区隔离 |
+| 代码调查、JVM 测试、文档 | Local Worktree 或 Cloud | 环境较轻，易复现 |
+| 仪器测试、历史 Room 升级 | 有 SDK 与模拟器的本地/自托管环境 | 托管云环境未必有设备 |
+| 定时只读报告 | Scheduled task | 已稳定方法按周期运行 |
+| PR 补丁建议 | Codex Action | API Key 与写权限可分 Job |
+
+映射 Cursor Background Agent 时，逐项核对 JDK、Android SDK、Gradle 缓存、网络白名单、Secrets、分支归属、设备能力和产物回传。只说“都能后台跑”没有工程意义。
+
+## 两周双轨，不比生成速度
+
+### 第一周：共享合同
+
+Cursor 与 Codex 共用新的根 `AGENTS.md`、项目宪法、Spec 模板和确定性验证命令。Cursor 专用资产冻结，Codex 只承接一个边界清楚的功能。
+
+### 第二周：相似任务对照
+
+选择复杂度相近的两项真实工作，一条用旧流程，一条用 Codex。记录：
+
+| 指标 | 记录方式 |
+|---|---|
+| 首次可评审时间 | 从任务批准到首个可读 diff |
+| 人工纠偏次数 | 需求、范围、架构、权限分别计数 |
+| 评审有效缺陷 | 去除纯风格意见后的发现数 |
+| 返工 | 合并前和合并后分别记录 |
+| 验证可信度 | 通过、失败、跳过、未运行是否区分 |
+| 权限事件 | 读敏感文件、网络、设备、远端写入 |
+| 成本 | 模型用量、CI 时间、工程师审查时间 |
+
+样本量很小时不要宣布“效率提升 40%”。先把异常和定性问题找出来，再累计多个 Sprint。
+
+## 退役与回退
+
+每类资产只有满足以下条件才删除旧版本：
+
+- 新位置有明确负责人；
+- 至少通过一次真实任务；
+- 同事能从 README 找到入口；
+- 权限和凭据重新审查；
+- 有 Git 标签、分支或文档记录可回退；
+- 删除日期已经通知团队。
+
+如果 Codex 流程失败，回退的是执行入口，不要回滚已经变得更清楚的共享 Spec、测试和项目知识。
 
 ## 迁移验收清单
 
-迁移完成时，至少能回答：
-
-- Codex 从哪些 AGENTS.md 获得规则，作用域是否正确？
-- 原 Rules 中的长期约束是否有唯一新位置？
-- 高频 Commands 是否已成为可触发、可验证的 Skills？
-- MCP 身份与写权限是否重新审查？
-- Hooks 是否按 Codex 协议测试，而非直接复制？
-- 后台 Android 环境能否真正运行所需 Gradle task？
-- `codex exec` 的沙箱和网络是否明确？
-- 旧配置的退役日期和回退方案是否清楚？
+- 所有 Cursor 资产是否有“迁移、合并、删除、保留”结论？
+- 长期约束在 `AGENTS.md` 中是否只有一份真相？
+- 高频 Commands 是否成为可触发、可验证的 Skills？
+- MCP 是否逐个重新认证并从只读开始？
+- Hooks 是否按 Codex 事件协议测试，而非复制 schema？
+- Android Studio、本地 Worktree、Cloud 和 CI 是否按任务选择？
+- `codex exec` 是否明确沙箱、输出与凭据？
+- 双轨指标、退役日期和回退点是否可查？
 
 ## 小结
 
-Cursor 到 Codex 的迁移需要把编辑器、Agent、规则、外部工具与后台环境分别对齐。没有一键导入反而迫使团队识别资产真正意图：项目知识进入 AGENTS 与宪法，成熟流程进入 Skills，命令安全进入 Codex Rules 和 Hooks，执行环境按 Android 任务选择。
-
-工具迁移到这里结束，但工程化没有“毕业版本”。接下来的结束语会把 24 讲收束成一条持续改进路线：怎样让驾驶舱随着项目一起生长，而不是半年后变成另一套过期文档。
-
-## 思考题
-
-1. 团队说“离不开 Cursor”时，真正不可替代的是编辑器体验、规则资产还是后台环境？
-2. 哪一条 Cursor Rule 在迁移后应该被删除，而不是转换？
+从 Cursor 迁移到 Codex，不是把 `.cursor` 改名为 `.codex`。先拆开编辑器、项目知识、可复用方法、外部连接、安全政策和执行环境，再逐项转换与验证。Android Studio 可以继续承担它最擅长的设备与图形工具，Codex 则成为仓库级工作流的 Agent 入口。
 
 ## 延伸阅读
 
-- [Cursor Rules](https://docs.cursor.com/context/rules-for-ai)
-- [Cursor Commands](https://docs.cursor.com/en/agent/chat/commands)
+- [Cursor Rules](https://docs.cursor.com/context/rules)
+- [Cursor CLI Permissions](https://docs.cursor.com/cli/reference/permissions)
 - [Cursor MCP](https://docs.cursor.com/context/model-context-protocol)
-- [Cursor Background Agents](https://docs.cursor.com/background-agent)
 - [Codex 官方文档](https://developers.openai.com/codex/)
-
+- [课程迁移盘点脚本](./配套文件/PocketTasks-codex/scripts/audit-cursor-assets.sh)

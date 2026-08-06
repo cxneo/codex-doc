@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/pre_tool_use.py\"",
+            "command": "/bin/sh -c 'hook_dir=\"$PWD\"; while [ \"$hook_dir\" != / ]; do if [ -f \"$hook_dir/.codex/hooks/pre_tool_use.py\" ]; then exec python3 \"$hook_dir/.codex/hooks/pre_tool_use.py\"; fi; hook_dir=\"$(dirname \"$hook_dir\")\"; done; exit 0'",
             "statusMessage": "Checking Android command policy",
             "timeout": 5
           }
@@ -16,4 +16,3 @@
     ]
   }
 }
-

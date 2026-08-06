@@ -5,20 +5,20 @@
 
 ## 现状证据
 
-本示例假设真实项目已经确认以下事实；落地时用实际路径替换：
+本计划对应课程项目。开始练习前，用当前提交重新确认：
 
 - Room DAO 暴露排序后的任务 Flow。
-- Repository 把 Entity 映射为应用模型。
-- TasksViewModel 暴露单一不可变 `TasksUiState`。
-- TasksScreen 只渲染状态并上报事件。
-- 项目已有 Preferences DataStore 和协程测试基建。
+- `TaskRepository` 把 Entity 映射为应用模型并组合筛选 Flow。
+- `TaskViewModel` 暴露单一不可变 `TaskUiState`。
+- `PocketTasksScreen` 只渲染状态并上报事件。
+- `DataStoreFilterPreferences` 负责筛选持久化。
 
 ## 目标设计
 
 ```text
                       Room tasks Flow
                             ↓
-filter event → ViewModel → combine → TasksUiState → TasksScreen
+filter event → TaskViewModel → TaskRepository.combine → TaskUiState → PocketTasksScreen
                     ↑
              DataStore filter Flow
 ```
@@ -29,7 +29,7 @@ Room 仍是任务事实源。DataStore 只保存 `TaskFilter`。ViewModel 组合
 
 ### 使用项目已有 DataStore
 
-- 选择：通过 Preferences Repository 暴露筛选 Flow 与更新方法。
+- 选择：通过 `FilterPreferences` 暴露筛选 Flow 与更新方法。
 - 理由：Spec 要求冷启动恢复，项目已有同类基础设施。
 - 不选择：`rememberSaveable` 和仅 `SavedStateHandle` 无法表达完整长期偏好合同。
 
@@ -47,10 +47,10 @@ Room 仍是任务事实源。DataStore 只保存 `TaskFilter`。ViewModel 组合
 ## 预计改动
 
 - `model/TaskFilter.kt`：筛选类型和纯规则。
-- Preferences Repository：筛选 Flow、默认值、更新和未知值回退。
-- `TasksUiState`：当前筛选与可见任务。
-- `TasksViewModel`：组合 Flow 并处理筛选事件。
-- `TasksScreen`：筛选控件、选中语义、两类空状态。
+- `data/FilterPreferences.kt`：筛选 Flow、默认值、更新和未知值回退。
+- `data/TaskRepository.kt`：组合 Room 与筛选 Flow。
+- `ui/TaskUiState` / `TaskViewModel.kt`：当前筛选、可见任务和事件。
+- `ui/PocketTasksScreen.kt`：筛选控件、选中语义、两类空状态。
 - 对应 `test` 与 `androidTest`。
 
 ## 明确不改
@@ -91,4 +91,3 @@ Room 仍是任务事实源。DataStore 只保存 `TaskFilter`。ViewModel 组合
 ## 未决问题
 
 无。
-

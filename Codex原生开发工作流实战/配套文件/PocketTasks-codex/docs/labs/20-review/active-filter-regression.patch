@@ -1,0 +1,13 @@
+diff --git a/app/src/main/java/com/example/pockettasks/model/TaskFilter.kt b/app/src/main/java/com/example/pockettasks/model/TaskFilter.kt
+index a9cecc5..34d282a 100644
+--- a/app/src/main/java/com/example/pockettasks/model/TaskFilter.kt
++++ b/app/src/main/java/com/example/pockettasks/model/TaskFilter.kt
+@@ -12,7 +12,7 @@ fun List<Task>.visibleFor(filter: TaskFilter): List<Task> =
+         .filter { task ->
+             when (filter) {
+                 TaskFilter.ALL -> true
+-                TaskFilter.ACTIVE -> !task.isCompleted
++                TaskFilter.ACTIVE -> task.isCompleted
+                 TaskFilter.COMPLETED -> task.isCompleted
+             }
+         }
